@@ -74,9 +74,7 @@ Event data is available here : [ProjectPokemon](https://github.com/projectpokemo
 
 To remove active events, use **Clear Event (Inject Null)** instead.
 
-```
 **Note:** After injecting a raid event, you may need to advance the system date by 1 day in-game to refresh the active raids.
-```
 
 Use **Clear Cache & Revalidate Events** if you've added or modified event folders and need to refresh validation results.
 
