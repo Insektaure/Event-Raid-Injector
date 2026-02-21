@@ -1,4 +1,4 @@
-# SV Event Raid Injector
+# Event Raid Injector
 
 Inject Tera Raid event data into Pokemon Scarlet & Violet save files directly on Nintendo Switch.
 
