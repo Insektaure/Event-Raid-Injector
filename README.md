@@ -125,6 +125,17 @@ If there isn't enough free space (2x save size), you'll be prompted to continue 
 
 Theme preference is saved to `theme.cfg` and persists across sessions.
 
+## Screenshots
+
+<div align="center">
+    <img src="screenshots/001.jpg">
+    <img src="screenshots/002.jpg">
+    <img src="screenshots/003.jpg">
+    <img src="screenshots/004.jpg">
+    <img src="screenshots/005.jpg">
+    <img src="screenshots/006.jpg">
+</div>
+
 ## Credits
 
 - **[Tera-Finder](https://github.com/Manu098vm/Tera-Finder)** by Manu098vm — Injection logic & block definitions
