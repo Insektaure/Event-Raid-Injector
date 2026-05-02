@@ -6,6 +6,7 @@
 #include <sys/stat.h>
 #include <sys/statvfs.h>
 #include <string>
+#include <vector>
 
 #ifndef APP_VERSION
 #define APP_VERSION "1.0.0"
@@ -229,9 +230,27 @@ void UI::showMessageAndWait(const char* title, const char* body) {
         SDL_RenderClear(renderer_);
         drawRect(0, 0, SCREEN_W, SCREEN_H, T().overlay);
 
-        drawTextCentered(fontLarge_, title, SCREEN_W/2, SCREEN_H/2 - 60, T().red);
-        drawTextCentered(font_, body, SCREEN_W/2, SCREEN_H/2, T().text);
-        drawTextCentered(fontSmall_, "Press A or B to continue", SCREEN_W/2, SCREEN_H/2 + 50, T().textDim);
+        drawTextCentered(fontLarge_, title, SCREEN_W/2, SCREEN_H/2 - 80, T().red);
+
+        // Render body line-by-line; SDL_ttf doesn't interpret '\n'.
+        std::string s(body ? body : "");
+        std::vector<std::string> lines;
+        size_t start = 0;
+        while (start <= s.size()) {
+            size_t nl = s.find('\n', start);
+            if (nl == std::string::npos) { lines.push_back(s.substr(start)); break; }
+            lines.push_back(s.substr(start, nl - start));
+            start = nl + 1;
+        }
+        const int lineH = 28;
+        int by = SCREEN_H/2 - (int(lines.size()) - 1) * lineH / 2;
+        for (const auto& line : lines) {
+            drawTextCentered(font_, line.c_str(), SCREEN_W/2, by, T().text);
+            by += lineH;
+        }
+
+        drawTextCentered(fontSmall_, "Press A or B to continue", SCREEN_W/2,
+                         SCREEN_H/2 + (int(lines.size()) * lineH)/2 + 30, T().textDim);
 
         SDL_RenderPresent(renderer_);
         SDL_Delay(16);
@@ -627,11 +646,12 @@ void UI::selectGame(GameType game) {
     mainMenuCursor_ = 0;
     eventInjected_ = false;
     saveDirty_ = false;
-    eventValidated_ = false;
     raidFolder_.clear();
     raidIdentifier_.clear();
+    raidPending_ = false;
     outbreakFolder_.clear();
     outbreakIdentifier_.clear();
+    outbreakPending_ = false;
     statusMessage_ = "Ready";
     screen_ = Screen::Main;
 }
@@ -681,7 +701,7 @@ void UI::drawMainScreenFrame() {
     bool enabled[MENU_ITEM_COUNT] = {
         true,                                   // Browse Raid: always
         true,                                   // Browse Outbreak: always
-        eventValidated_,                        // Inject: after browse (allow re-inject)
+        raidPending_ || outbreakPending_,       // Inject: any pending selection
         true,                                   // Clear Raid: always
         true,                                   // Clear Outbreak: always
         saveDirty_,                             // Save: any in-memory change
@@ -705,10 +725,15 @@ void UI::drawMainScreenFrame() {
         drawText(font_, label.c_str(), menuX, iy + 8, col);
     }
 
-    // Event info: two columns, raid (left) and outbreak (right)
-    int eventY = menuY + MENU_ITEM_COUNT * ITEM_H + 40;
-    constexpr int COL_LEFT_X = 80;
-    constexpr int COL_RIGHT_X = SCREEN_W / 2 + 20;
+    // Event info panel: right side of menu, two slots stacked vertically.
+    constexpr int PANEL_X = 660;
+    constexpr int PANEL_W = SCREEN_W - PANEL_X - 40;
+    constexpr int SLOT_H  = 130;
+    const int panelTop    = menuY - 8;
+    const int panelHeight = SLOT_H * 2 + 16;
+
+    drawRect(PANEL_X - 10, panelTop, PANEL_W + 20, panelHeight, T().panelBg);
+    drawRectOutline(PANEL_X - 10, panelTop, PANEL_W + 20, panelHeight, T().popupBorder, 2);
 
     auto folderBaseName = [](const std::string& full) {
         std::string s = full;
@@ -717,35 +742,40 @@ void UI::drawMainScreenFrame() {
         return pos != std::string::npos ? s.substr(pos + 1) : s;
     };
 
-    auto drawSlot = [&](int x, const char* title,
-                        const std::string& folder, const std::string& ident) {
-        drawText(font_, title, x, eventY, T().text);
+    auto drawSlot = [&](int yTop, const char* title,
+                        const std::string& folder, const std::string& ident,
+                        bool pending) {
+        drawText(font_, title, PANEL_X, yTop, T().text);
         if (!folder.empty()) {
             std::string s = "Folder: " + folderBaseName(folder);
-            drawText(fontSmall_, s.c_str(), x, eventY + 26, T().text);
+            drawText(fontSmall_, s.c_str(), PANEL_X, yTop + 30, T().text);
             if (!ident.empty()) {
                 std::string idStr = "Identifier: " + ident;
-                drawText(fontSmall_, idStr.c_str(), x, eventY + 50, T().goldLabel);
+                drawText(fontSmall_, idStr.c_str(), PANEL_X, yTop + 56, T().goldLabel);
             }
+            const char* state = pending ? "[Pending — press Inject]" : "[Injected]";
+            SDL_Color stateCol = pending ? T().textDim : T().statusText;
+            drawText(fontSmall_, state, PANEL_X, yTop + 86, stateCol);
         } else if (!ident.empty()) {
             // Cleared (null) state — folder empty but identifier set.
             std::string idStr = "Identifier: " + ident;
-            drawText(fontSmall_, idStr.c_str(), x, eventY + 26, T().goldLabel);
+            drawText(fontSmall_, idStr.c_str(), PANEL_X, yTop + 30, T().goldLabel);
+            drawText(fontSmall_, "[Cleared]", PANEL_X, yTop + 60, T().statusText);
         } else {
-            drawText(fontSmall_, "[None selected]", x, eventY + 26, T().textDim);
+            drawText(fontSmall_, "[None selected]", PANEL_X, yTop + 30, T().textDim);
         }
     };
 
-    drawSlot(COL_LEFT_X,  "Raid event:",     raidFolder_,     raidIdentifier_);
-    drawSlot(COL_RIGHT_X, "Outbreak event:", outbreakFolder_, outbreakIdentifier_);
-    eventY += 80;
+    drawSlot(menuY,              "Raid event:",     raidFolder_,     raidIdentifier_,     raidPending_);
+    drawSlot(menuY + SLOT_H,     "Outbreak event:", outbreakFolder_, outbreakIdentifier_, outbreakPending_);
 
-    // Status
+    // Status under the menu (replaces the old bottom info row).
+    int statusY = menuY + MENU_ITEM_COUNT * ITEM_H + 40;
     SDL_Color statusColor = (eventInjected_ || saveDirty_) ? T().statusText : T().textDim;
     if (statusMessage_.find("Error") != std::string::npos ||
         statusMessage_.find("Failed") != std::string::npos)
         statusColor = T().red;
-    drawText(font_, ("Status: " + statusMessage_).c_str(), 80, eventY, statusColor);
+    drawText(font_, ("Status: " + statusMessage_).c_str(), 80, statusY, statusColor);
 
     drawStatusBar("A: Select   B: Back to Game   -: About   +: Quit");
 }
@@ -772,7 +802,7 @@ void UI::handleMainScreenInput(SDL_Event& e, bool& running) {
                     doClearOutbreakEvent();
                     break;
                 case MENU_INJECT:
-                    if (eventValidated_) doInject();
+                    if (raidPending_ || outbreakPending_) doInject();
                     break;
                 case MENU_SAVE:
                     if (saveDirty_) doSaveAndExit(running);
@@ -834,7 +864,7 @@ void UI::handleMainScreenInput(SDL_Event& e, bool& running) {
                 case MENU_BROWSE_OUTBREAK: openOutbreakBrowser(); break;
                 case MENU_CLEAR: doClearEvent(); break;
                 case MENU_CLEAR_OUTBREAK: doClearOutbreakEvent(); break;
-                case MENU_INJECT: if (eventValidated_) doInject(); break;
+                case MENU_INJECT: if (raidPending_ || outbreakPending_) doInject(); break;
                 case MENU_SAVE: if (saveDirty_) doSaveAndExit(running); break;
                 case MENU_REVALIDATE: {
                     FolderBrowser::deleteCache(basePath_ + "events/");
@@ -874,31 +904,46 @@ void UI::openOutbreakBrowser() {
 void UI::doInject() {
     if (!saveLoaded_)
         return;
-
-    const bool isOutbreak = (selectedEventKind_ == EventKind::Outbreak);
-    const std::string& folder = isOutbreak ? outbreakFolder_ : raidFolder_;
-    if (folder.empty())
+    if (!raidPending_ && !outbreakPending_)
         return;
 
-    showWorking(isOutbreak ? "Injecting outbreak event..." : "Injecting event...");
-    InjectorResult result = isOutbreak
-        ? Injector::injectOutbreakEvent(save_, folder)
-        : Injector::injectRaidEvent(save_, folder);
+    std::string successList;
+    std::string errorList;
 
-    if (result.success) {
-        eventInjected_ = true;
-        saveDirty_ = true;
-        if (isOutbreak)
-            outbreakIdentifier_ = result.identifier;
-        else
-            raidIdentifier_ = result.identifier;
-        statusMessage_ = "Injected: " + result.identifier;
+    auto run = [&](const char* label, bool& pending, const std::string& folder,
+                   std::string& outIdent,
+                   InjectorResult (*fn)(SaveFile&, const std::string&)) {
+        if (!pending || folder.empty())
+            return;
+        showWorking((std::string("Injecting ") + label + "...").c_str());
+        InjectorResult r = fn(save_, folder);
+        if (r.success) {
+            outIdent = r.identifier;
+            pending = false;
+            saveDirty_ = true;
+            eventInjected_ = true;
+            if (!successList.empty()) successList += "\n";
+            successList += std::string(label) + ": " + r.identifier;
+        } else {
+            if (!errorList.empty()) errorList += "\n";
+            errorList += std::string(label) + ": " + r.message;
+        }
+    };
+
+    run("raid event", raidPending_, raidFolder_, raidIdentifier_, Injector::injectRaidEvent);
+    run("outbreak event", outbreakPending_, outbreakFolder_, outbreakIdentifier_, Injector::injectOutbreakEvent);
+
+    if (!successList.empty()) {
+        statusMessage_ = "Injected: " + successList;
         mainMenuCursor_ = MENU_SAVE;
-    } else {
-        statusMessage_ = "Error: " + result.message;
     }
+    if (!errorList.empty())
+        statusMessage_ = "Error: " + errorList;
 
-    showMessageAndWait(result.success ? "Success" : "Error", result.message.c_str());
+    if (!errorList.empty())
+        showMessageAndWait("Error", errorList.c_str());
+    else
+        showMessageAndWait("Success", successList.c_str());
 }
 
 void UI::doClearEvent() {
@@ -916,8 +961,7 @@ void UI::doClearEvent() {
         saveDirty_ = true;
         raidFolder_.clear();
         raidIdentifier_ = "Null (cleared)";
-        if (selectedEventKind_ == EventKind::Raid)
-            eventValidated_ = false;
+        raidPending_ = false;
         statusMessage_ = "Event data cleared";
         mainMenuCursor_ = MENU_SAVE;
     } else {
@@ -942,8 +986,7 @@ void UI::doClearOutbreakEvent() {
         saveDirty_ = true;
         outbreakFolder_.clear();
         outbreakIdentifier_ = "Null (cleared)";
-        if (selectedEventKind_ == EventKind::Outbreak)
-            eventValidated_ = false;
+        outbreakPending_ = false;
         statusMessage_ = "Outbreak event data cleared";
         mainMenuCursor_ = MENU_SAVE;
     } else {
@@ -1050,12 +1093,13 @@ void UI::selectEventFolder() {
         if (isOutbreak) {
             outbreakFolder_ = selPath;
             outbreakIdentifier_ = ident;
+            outbreakPending_ = true;
         } else {
             raidFolder_ = selPath;
             raidIdentifier_ = ident;
+            raidPending_ = true;
         }
 
-        eventValidated_ = true;
         eventInjected_ = false;
 
         statusMessage_ = std::string(isOutbreak ? "Outbreak event selected: "

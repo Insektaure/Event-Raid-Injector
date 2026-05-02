@@ -74,16 +74,18 @@ private:
 
     // Injection state
     enum class EventKind { Raid, Outbreak };
-    EventKind selectedEventKind_ = EventKind::Raid;
-    bool eventValidated_ = false;     // browser-selected folder of selectedEventKind_ awaits inject
+    EventKind selectedEventKind_ = EventKind::Raid;  // last-browsed kind (for browser dispatch)
     bool eventInjected_ = false;      // last inject action just succeeded (for status display)
     bool saveDirty_ = false;          // in-memory save differs from disk
 
-    // Per-kind staged state (independent slots, both shown in the bottom panel).
+    // Per-kind staged state. Each slot is independent and shown in the right-side panel.
+    // Pending = user picked a folder, hasn't pressed Inject yet.
     std::string raidFolder_;
     std::string raidIdentifier_;
+    bool raidPending_ = false;
     std::string outbreakFolder_;
     std::string outbreakIdentifier_;
+    bool outbreakPending_ = false;
 
     std::string statusMessage_;
 
