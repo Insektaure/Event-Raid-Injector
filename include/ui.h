@@ -62,19 +62,29 @@ private:
 
     // Main screen
     int mainMenuCursor_ = 0;
-    static constexpr int MENU_BROWSE     = 0;
-    static constexpr int MENU_CLEAR      = 1;
-    static constexpr int MENU_INJECT     = 2;
-    static constexpr int MENU_SAVE       = 3;
-    static constexpr int MENU_REVALIDATE = 4;
-    static constexpr int MENU_EXIT       = 5;
-    static constexpr int MENU_ITEM_COUNT = 6;
+    static constexpr int MENU_BROWSE          = 0;
+    static constexpr int MENU_BROWSE_OUTBREAK = 1;
+    static constexpr int MENU_INJECT          = 2;
+    static constexpr int MENU_CLEAR           = 3;
+    static constexpr int MENU_CLEAR_OUTBREAK  = 4;
+    static constexpr int MENU_SAVE            = 5;
+    static constexpr int MENU_REVALIDATE      = 6;
+    static constexpr int MENU_EXIT            = 7;
+    static constexpr int MENU_ITEM_COUNT      = 8;
 
     // Injection state
-    std::string selectedEventFolder_;
-    bool eventValidated_ = false;
-    bool eventInjected_ = false;
-    std::string eventIdentifier_;
+    enum class EventKind { Raid, Outbreak };
+    EventKind selectedEventKind_ = EventKind::Raid;
+    bool eventValidated_ = false;     // browser-selected folder of selectedEventKind_ awaits inject
+    bool eventInjected_ = false;      // last inject action just succeeded (for status display)
+    bool saveDirty_ = false;          // in-memory save differs from disk
+
+    // Per-kind staged state (independent slots, both shown in the bottom panel).
+    std::string raidFolder_;
+    std::string raidIdentifier_;
+    std::string outbreakFolder_;
+    std::string outbreakIdentifier_;
+
     std::string statusMessage_;
 
     // Folder browser
@@ -119,7 +129,10 @@ private:
     void selectGame(GameType game);
     void doInject();
     void doClearEvent();
+    void doClearOutbreakEvent();
     void selectEventFolder();
+    void openRaidBrowser();
+    void openOutbreakBrowser();
     void doSaveAndExit(bool& running);
     void loadGameIcons();
 

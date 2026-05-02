@@ -49,12 +49,14 @@ void FolderBrowser::deleteCache(const std::string& eventsDir) {
     std::remove(path.c_str());
 }
 
-void FolderBrowser::open(const std::string& startPath) {
+void FolderBrowser::open(const std::string& startPath, Validator validator) {
     currentPath_ = startPath;
     if (!currentPath_.empty() && currentPath_.back() != '/')
         currentPath_ += '/';
     cursor_ = 0;
     scrollOffset_ = 0;
+    validator_ = validator ? validator
+                           : Validator([](const std::string& p) { return Injector::isValidRaidFolder(p); });
     refresh();
 }
 
@@ -90,7 +92,8 @@ void FolderBrowser::refresh() {
         if (it != cache.end()) {
             de.isValidEvent = it->second;
         } else {
-            de.isValidEvent = Injector::isValidRaidFolder(fullPath + "/");
+            de.isValidEvent = validator_ ? validator_(fullPath + "/")
+                                         : Injector::isValidRaidFolder(fullPath + "/");
             cacheChanged = true;
         }
 

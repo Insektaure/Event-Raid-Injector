@@ -20,6 +20,10 @@ public:
     // Returns true on success.
     bool replaceBlockData(uint32_t key, const std::vector<uint8_t>& data);
 
+    // Set a Bool1/Bool2 block. Bool blocks carry their value in the type byte
+    // (Bool1=false, Bool2=true) and have no data payload.
+    bool setBoolBlock(uint32_t key, bool value);
+
 private:
     std::vector<SCBlock> blocks_;
     std::string filePath_;

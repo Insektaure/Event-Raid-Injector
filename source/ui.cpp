@@ -626,9 +626,12 @@ void UI::selectGame(GameType game) {
     saveLoaded_ = true;
     mainMenuCursor_ = 0;
     eventInjected_ = false;
+    saveDirty_ = false;
     eventValidated_ = false;
-    selectedEventFolder_.clear();
-    eventIdentifier_.clear();
+    raidFolder_.clear();
+    raidIdentifier_.clear();
+    outbreakFolder_.clear();
+    outbreakIdentifier_.clear();
     statusMessage_ = "Ready";
     screen_ = Screen::Main;
 }
@@ -665,8 +668,10 @@ void UI::drawMainScreenFrame() {
 
     const char* labels[MENU_ITEM_COUNT] = {
         "Browse Event Folder",
-        "Clear Event (Inject Null)",
+        "Browse Outbreak Folder",
         "Inject Event",
+        "Clear Event (Inject Null)",
+        "Clear Outbreak Event (Inject Null)",
         "Save & Exit",
         "Clear Cache & Revalidate Events",
         "Exit Without Saving",
@@ -674,10 +679,12 @@ void UI::drawMainScreenFrame() {
 
     // Determine which items are enabled
     bool enabled[MENU_ITEM_COUNT] = {
-        true,                                   // Browse: always
-        true,                                   // Clear: always
-        eventValidated_ && !eventInjected_,     // Inject: after browse, before inject
-        eventInjected_,                         // Save: after inject
+        true,                                   // Browse Raid: always
+        true,                                   // Browse Outbreak: always
+        eventValidated_,                        // Inject: after browse (allow re-inject)
+        true,                                   // Clear Raid: always
+        true,                                   // Clear Outbreak: always
+        saveDirty_,                             // Save: any in-memory change
         true,                                   // Revalidate: always
         true,                                   // Exit: always
     };
@@ -698,31 +705,43 @@ void UI::drawMainScreenFrame() {
         drawText(font_, label.c_str(), menuX, iy + 8, col);
     }
 
-    // Event info
+    // Event info: two columns, raid (left) and outbreak (right)
     int eventY = menuY + MENU_ITEM_COUNT * ITEM_H + 40;
-    if (!selectedEventFolder_.empty()) {
-        // Show just the folder name
-        std::string folderName = selectedEventFolder_;
-        if (folderName.back() == '/') folderName.pop_back();
-        auto pos = folderName.rfind('/');
-        if (pos != std::string::npos) folderName = folderName.substr(pos + 1);
+    constexpr int COL_LEFT_X = 80;
+    constexpr int COL_RIGHT_X = SCREEN_W / 2 + 20;
 
-        std::string eventStr = "Event folder: " + folderName;
-        drawText(font_, eventStr.c_str(), 80, eventY, T().text);
-        eventY += 26;
+    auto folderBaseName = [](const std::string& full) {
+        std::string s = full;
+        if (!s.empty() && s.back() == '/') s.pop_back();
+        auto pos = s.rfind('/');
+        return pos != std::string::npos ? s.substr(pos + 1) : s;
+    };
 
-        if (!eventIdentifier_.empty()) {
-            std::string idStr = "Identifier: " + eventIdentifier_;
-            drawText(font_, idStr.c_str(), 80, eventY, T().goldLabel);
-            eventY += 26;
+    auto drawSlot = [&](int x, const char* title,
+                        const std::string& folder, const std::string& ident) {
+        drawText(font_, title, x, eventY, T().text);
+        if (!folder.empty()) {
+            std::string s = "Folder: " + folderBaseName(folder);
+            drawText(fontSmall_, s.c_str(), x, eventY + 26, T().text);
+            if (!ident.empty()) {
+                std::string idStr = "Identifier: " + ident;
+                drawText(fontSmall_, idStr.c_str(), x, eventY + 50, T().goldLabel);
+            }
+        } else if (!ident.empty()) {
+            // Cleared (null) state — folder empty but identifier set.
+            std::string idStr = "Identifier: " + ident;
+            drawText(fontSmall_, idStr.c_str(), x, eventY + 26, T().goldLabel);
+        } else {
+            drawText(fontSmall_, "[None selected]", x, eventY + 26, T().textDim);
         }
-    } else {
-        drawText(font_, "Event: [None selected]", 80, eventY, T().textDim);
-        eventY += 26;
-    }
+    };
+
+    drawSlot(COL_LEFT_X,  "Raid event:",     raidFolder_,     raidIdentifier_);
+    drawSlot(COL_RIGHT_X, "Outbreak event:", outbreakFolder_, outbreakIdentifier_);
+    eventY += 80;
 
     // Status
-    SDL_Color statusColor = eventInjected_ ? T().statusText : T().textDim;
+    SDL_Color statusColor = (eventInjected_ || saveDirty_) ? T().statusText : T().textDim;
     if (statusMessage_.find("Error") != std::string::npos ||
         statusMessage_.find("Failed") != std::string::npos)
         statusColor = T().red;
@@ -741,32 +760,32 @@ void UI::handleMainScreenInput(SDL_Event& e, bool& running) {
         } else if (btn == SDL_CONTROLLER_BUTTON_B) { // A on Switch
             switch (mainMenuCursor_) {
                 case MENU_BROWSE:
-                    // Open folder browser
-                    {
-                        std::string eventsDir = basePath_ + "events/";
-                        mkdir(eventsDir.c_str(), 0755);
-                        browser_.open(eventsDir);
-                    }
-                    screen_ = Screen::FolderBrowser;
+                    openRaidBrowser();
+                    break;
+                case MENU_BROWSE_OUTBREAK:
+                    openOutbreakBrowser();
                     break;
                 case MENU_CLEAR:
                     doClearEvent();
                     break;
+                case MENU_CLEAR_OUTBREAK:
+                    doClearOutbreakEvent();
+                    break;
                 case MENU_INJECT:
-                    if (eventValidated_ && !eventInjected_) doInject();
+                    if (eventValidated_) doInject();
                     break;
                 case MENU_SAVE:
-                    if (eventInjected_) doSaveAndExit(running);
+                    if (saveDirty_) doSaveAndExit(running);
                     break;
                 case MENU_REVALIDATE:
                     {
-                        std::string eventsDir = basePath_ + "events/";
-                        FolderBrowser::deleteCache(eventsDir);
+                        FolderBrowser::deleteCache(basePath_ + "events/");
+                        FolderBrowser::deleteCache(basePath_ + "outbreakevents/");
                         statusMessage_ = "Cache cleared. Events will be revalidated on next browse.";
                     }
                     break;
                 case MENU_EXIT:
-                    if (eventInjected_) {
+                    if (saveDirty_) {
                         if (showConfirmDialog("Unsaved Changes",
                             "You have injected data that hasn't been saved. Discard?"))
                             running = false;
@@ -777,7 +796,7 @@ void UI::handleMainScreenInput(SDL_Event& e, bool& running) {
             }
         } else if (btn == SDL_CONTROLLER_BUTTON_A) { // B on Switch
             // Go back to game selector (unmount save)
-            if (eventInjected_) {
+            if (saveDirty_) {
                 if (!showConfirmDialog("Unsaved Changes",
                     "You have injected data that hasn't been saved. Discard?"))
                     return;
@@ -793,7 +812,7 @@ void UI::handleMainScreenInput(SDL_Event& e, bool& running) {
         } else if (btn == SDL_CONTROLLER_BUTTON_BACK) { // - on Switch
             showAbout_ = true;
         } else if (btn == SDL_CONTROLLER_BUTTON_START) { // +
-            if (eventInjected_) {
+            if (saveDirty_) {
                 if (showConfirmDialog("Unsaved Changes", "Save before quitting?"))
                     doSaveAndExit(running);
                 else
@@ -811,19 +830,15 @@ void UI::handleMainScreenInput(SDL_Event& e, bool& running) {
             mainMenuCursor_ = (mainMenuCursor_ + 1) % MENU_ITEM_COUNT;
         else if (e.key.keysym.sym == SDLK_a || e.key.keysym.sym == SDLK_RETURN) {
             switch (mainMenuCursor_) {
-                case MENU_BROWSE: {
-                    std::string eventsDir = basePath_ + "events/";
-                    mkdir(eventsDir.c_str(), 0755);
-                    browser_.open(eventsDir);
-                    screen_ = Screen::FolderBrowser;
-                    break;
-                }
+                case MENU_BROWSE: openRaidBrowser(); break;
+                case MENU_BROWSE_OUTBREAK: openOutbreakBrowser(); break;
                 case MENU_CLEAR: doClearEvent(); break;
-                case MENU_INJECT: if (eventValidated_ && !eventInjected_) doInject(); break;
-                case MENU_SAVE: if (eventInjected_) doSaveAndExit(running); break;
+                case MENU_CLEAR_OUTBREAK: doClearOutbreakEvent(); break;
+                case MENU_INJECT: if (eventValidated_) doInject(); break;
+                case MENU_SAVE: if (saveDirty_) doSaveAndExit(running); break;
                 case MENU_REVALIDATE: {
-                    std::string eventsDir = basePath_ + "events/";
-                    FolderBrowser::deleteCache(eventsDir);
+                    FolderBrowser::deleteCache(basePath_ + "events/");
+                    FolderBrowser::deleteCache(basePath_ + "outbreakevents/");
                     statusMessage_ = "Cache cleared. Events will be revalidated on next browse.";
                     break;
                 }
@@ -840,16 +855,43 @@ void UI::handleMainScreenInput(SDL_Event& e, bool& running) {
     }
 }
 
+void UI::openRaidBrowser() {
+    std::string dir = basePath_ + "events/";
+    mkdir(dir.c_str(), 0755);
+    selectedEventKind_ = EventKind::Raid;
+    browser_.open(dir, [](const std::string& p) { return Injector::isValidRaidFolder(p); });
+    screen_ = Screen::FolderBrowser;
+}
+
+void UI::openOutbreakBrowser() {
+    std::string dir = basePath_ + "outbreakevents/";
+    mkdir(dir.c_str(), 0755);
+    selectedEventKind_ = EventKind::Outbreak;
+    browser_.open(dir, [](const std::string& p) { return Injector::isValidOutbreakFolder(p); });
+    screen_ = Screen::FolderBrowser;
+}
+
 void UI::doInject() {
-    if (!saveLoaded_ || selectedEventFolder_.empty())
+    if (!saveLoaded_)
         return;
 
-    showWorking("Injecting event...");
-    InjectorResult result = Injector::injectRaidEvent(save_, selectedEventFolder_);
+    const bool isOutbreak = (selectedEventKind_ == EventKind::Outbreak);
+    const std::string& folder = isOutbreak ? outbreakFolder_ : raidFolder_;
+    if (folder.empty())
+        return;
+
+    showWorking(isOutbreak ? "Injecting outbreak event..." : "Injecting event...");
+    InjectorResult result = isOutbreak
+        ? Injector::injectOutbreakEvent(save_, folder)
+        : Injector::injectRaidEvent(save_, folder);
 
     if (result.success) {
         eventInjected_ = true;
-        eventIdentifier_ = result.identifier;
+        saveDirty_ = true;
+        if (isOutbreak)
+            outbreakIdentifier_ = result.identifier;
+        else
+            raidIdentifier_ = result.identifier;
         statusMessage_ = "Injected: " + result.identifier;
         mainMenuCursor_ = MENU_SAVE;
     } else {
@@ -871,10 +913,38 @@ void UI::doClearEvent() {
 
     if (result.success) {
         eventInjected_ = true;
-        eventIdentifier_ = "Null (cleared)";
-        selectedEventFolder_.clear();
-        eventValidated_ = false;
+        saveDirty_ = true;
+        raidFolder_.clear();
+        raidIdentifier_ = "Null (cleared)";
+        if (selectedEventKind_ == EventKind::Raid)
+            eventValidated_ = false;
         statusMessage_ = "Event data cleared";
+        mainMenuCursor_ = MENU_SAVE;
+    } else {
+        statusMessage_ = "Error: " + result.message;
+    }
+
+    showMessageAndWait(result.success ? "Success" : "Error", result.message.c_str());
+}
+
+void UI::doClearOutbreakEvent() {
+    if (!saveLoaded_)
+        return;
+
+    if (!showConfirmDialog("Clear Outbreak Event", "Remove all active mass outbreak event data?"))
+        return;
+
+    showWorking("Clearing outbreak event...");
+    InjectorResult result = Injector::injectNullOutbreakEvent(save_);
+
+    if (result.success) {
+        eventInjected_ = true;
+        saveDirty_ = true;
+        outbreakFolder_.clear();
+        outbreakIdentifier_ = "Null (cleared)";
+        if (selectedEventKind_ == EventKind::Outbreak)
+            eventValidated_ = false;
+        statusMessage_ = "Outbreak event data cleared";
         mainMenuCursor_ = MENU_SAVE;
     } else {
         statusMessage_ = "Error: " + result.message;
@@ -887,6 +957,7 @@ void UI::doSaveAndExit(bool& running) {
     showWorking("Saving...");
     if (save_.save(savePath_)) {
         account_.commitSave();
+        saveDirty_ = false;
         showMessageAndWait("Saved", "Save file updated successfully.");
         running = false;
     } else {
@@ -902,7 +973,9 @@ void UI::drawFolderBrowserFrame() {
     SDL_SetRenderDrawColor(renderer_, T().bg.r, T().bg.g, T().bg.b, 255);
     SDL_RenderClear(renderer_);
 
-    drawTextCentered(fontLarge_, "Select Event Folder", SCREEN_W/2, 35, T().text);
+    drawTextCentered(fontLarge_,
+        selectedEventKind_ == EventKind::Outbreak ? "Select Outbreak Folder" : "Select Event Folder",
+        SCREEN_W/2, 35, T().text);
 
     // Separator
     drawRect(40, 70, SCREEN_W - 80, 2, T().popupBorder);
@@ -912,8 +985,11 @@ void UI::drawFolderBrowserFrame() {
 
     if (entries.empty()) {
         drawTextCentered(font_, "No event folders found.", SCREEN_W/2, SCREEN_H/2 - 20, T().textDim);
-        drawTextCentered(fontSmall_, "Place event folders in sdmc:/switch/EventRaidInjector/events/",
-                         SCREEN_W/2, SCREEN_H/2 + 20, T().textDim);
+        drawTextCentered(fontSmall_,
+            selectedEventKind_ == EventKind::Outbreak
+                ? "Place outbreak folders in sdmc:/switch/EventRaidInjector/outbreakevents/"
+                : "Place event folders in sdmc:/switch/EventRaidInjector/events/",
+            SCREEN_W/2, SCREEN_H/2 + 20, T().textDim);
         drawStatusBar("B: Back");
         return;
     }
@@ -960,25 +1036,39 @@ void UI::selectEventFolder() {
     std::string selPath = browser_.selectedPath();
     if (selPath.empty()) return;
 
-    if (Injector::isValidRaidFolder(selPath)) {
-        selectedEventFolder_ = selPath;
+    const bool isOutbreak = (selectedEventKind_ == EventKind::Outbreak);
+    const bool valid = isOutbreak ? Injector::isValidOutbreakFolder(selPath)
+                                  : Injector::isValidRaidFolder(selPath);
+
+    if (valid) {
+        // Read identifier for display
+        std::string ident;
+        std::ifstream idFile(selPath + "Identifier.txt");
+        if (idFile.is_open())
+            std::getline(idFile, ident);
+
+        if (isOutbreak) {
+            outbreakFolder_ = selPath;
+            outbreakIdentifier_ = ident;
+        } else {
+            raidFolder_ = selPath;
+            raidIdentifier_ = ident;
+        }
+
         eventValidated_ = true;
         eventInjected_ = false;
 
-        // Read identifier for display
-        std::string idPath = selPath + "Identifier.txt";
-        std::ifstream idFile(idPath);
-        if (idFile.is_open()) {
-            std::getline(idFile, eventIdentifier_);
-        }
-
-        statusMessage_ = "Event selected: " + eventIdentifier_;
+        statusMessage_ = std::string(isOutbreak ? "Outbreak event selected: "
+                                                : "Event selected: ") + ident;
         mainMenuCursor_ = MENU_INJECT;
         screen_ = Screen::Main;
     } else {
         showMessageAndWait("Invalid Folder",
-            "This folder does not contain valid raid event data.\n"
-            "Expected: Identifier.txt + Files/ with binary data.");
+            isOutbreak
+                ? "This folder does not contain valid outbreak event data.\n"
+                  "Expected: Identifier.txt + Files/ with pokedata_array, zone_main_array, zone_su1_array."
+                : "This folder does not contain valid raid event data.\n"
+                  "Expected: Identifier.txt + Files/ with binary data.");
     }
 }
 
@@ -1164,8 +1254,9 @@ void UI::run(const std::string& basePath) {
     themeIndex_ = loadThemeIndex(basePath_);
     theme_ = &getTheme(themeIndex_);
 
-    // Create events directory
+    // Create events directories
     mkdir((basePath_ + "events/").c_str(), 0755);
+    mkdir((basePath_ + "outbreakevents/").c_str(), 0755);
 
     // Init account system
     account_.init();

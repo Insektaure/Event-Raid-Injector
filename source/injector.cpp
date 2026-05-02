@@ -50,6 +50,24 @@ static std::string readTextFile(const std::string& path) {
     return content;
 }
 
+bool isValidOutbreakFolder(const std::string& path) {
+    if (!fileExists(path + "Identifier.txt"))
+        return false;
+
+    std::string filesDir = path + "Files/";
+
+    // Required: pokedata + Paldea + Kitakami zones (Outbreaks BCAT shipped in 2.0.0)
+    if (findVersionedFile(filesDir, "pokedata_array").empty())
+        return false;
+    if (findVersionedFile(filesDir, "zone_main_array").empty())
+        return false;
+    if (findVersionedFile(filesDir, "zone_su1_array").empty())
+        return false;
+    // zone_su2_array (Blueberry) is optional, only present in 3.0.0+ events.
+
+    return true;
+}
+
 bool isValidRaidFolder(const std::string& path) {
     // Check Identifier.txt
     if (!fileExists(path + "Identifier.txt"))
@@ -131,6 +149,82 @@ InjectorResult injectRaidEvent(SaveFile& save, const std::string& folderPath) {
     return result;
 }
 
+InjectorResult injectOutbreakEvent(SaveFile& save, const std::string& folderPath) {
+    InjectorResult result{};
+
+    if (!save.isLoaded()) {
+        result.message = "Save file not loaded";
+        return result;
+    }
+
+    std::string path = folderPath;
+    if (!path.empty() && path.back() != '/')
+        path += '/';
+
+    result.identifier = readTextFile(path + "Identifier.txt");
+    if (result.identifier.empty()) {
+        result.message = "Failed to read Identifier.txt";
+        return result;
+    }
+
+    std::string filesDir = path + "Files/";
+
+    // Required blocks: pokedata, Paldea zones, Kitakami zones.
+    struct FileSpec {
+        const char* baseName;
+        uint32_t blockKey;
+        bool required;
+    };
+    static const FileSpec specs[] = {
+        { "pokedata_array",  KEY_OUTBREAK_POKEDATA,        true  },
+        { "zone_main_array", KEY_OUTBREAK_ZONES_PALDEA,    true  },
+        { "zone_su1_array",  KEY_OUTBREAK_ZONES_KITAKAMI,  true  },
+        { "zone_su2_array",  KEY_OUTBREAK_ZONES_BLUEBERRY, false },
+    };
+
+    for (const auto& spec : specs) {
+        std::string filePath = findVersionedFile(filesDir, spec.baseName);
+        if (filePath.empty()) {
+            if (!spec.required)
+                continue;
+            result.message = std::string("Missing file: ") + spec.baseName;
+            return result;
+        }
+
+        std::vector<uint8_t> data = readBinaryFile(filePath);
+        if (data.empty()) {
+            result.message = std::string("Failed to read: ") + spec.baseName;
+            return result;
+        }
+
+        // Match Tera-Finder FinalizeImportOutbreak: skip blocks whose Type is None
+        // (or absent). Creating new blocks would change the encrypted file size,
+        // which is unsafe on the Switch journaled save filesystem.
+        SCBlock* block = save.findBlock(spec.blockKey);
+        if (!block || block->type == SCTypeCode::None)
+            continue;
+
+        if (!save.replaceBlockData(spec.blockKey, data)) {
+            result.message = std::string("Failed to inject block: ") + spec.baseName;
+            return result;
+        }
+    }
+
+    // Enable the BCAT outbreak event flag. Tera-Finder only flips it if it
+    // currently exists with a non-None type — preserve that behavior.
+    SCBlock* enabled = save.findBlock(KEY_OUTBREAK_ENABLED);
+    if (enabled && enabled->type != SCTypeCode::None) {
+        if (!save.setBoolBlock(KEY_OUTBREAK_ENABLED, true)) {
+            result.message = "Failed to enable outbreak event flag";
+            return result;
+        }
+    }
+
+    result.success = true;
+    result.message = "Successfully imported outbreak event [" + result.identifier + "]";
+    return result;
+}
+
 InjectorResult injectNullEvent(SaveFile& save) {
     InjectorResult result{};
 
@@ -162,6 +256,53 @@ InjectorResult injectNullEvent(SaveFile& save) {
     result.success = true;
     result.identifier = "Null";
     result.message = "Successfully cleared raid event data";
+    return result;
+}
+
+InjectorResult injectNullOutbreakEvent(SaveFile& save) {
+    InjectorResult result{};
+
+    if (!save.isLoaded()) {
+        result.message = "Save file not loaded";
+        return result;
+    }
+
+    struct NullSpec {
+        uint32_t key;
+        size_t size;
+    };
+    static const NullSpec specs[] = {
+        { KEY_OUTBREAK_POKEDATA,        SIZE_OUTBREAK_POKEDATA       },
+        { KEY_OUTBREAK_ZONES_PALDEA,    SIZE_OUTBREAK_ZONES_PALDEA   },
+        { KEY_OUTBREAK_ZONES_KITAKAMI,  SIZE_OUTBREAK_ZONES_KITAKAMI },
+        { KEY_OUTBREAK_ZONES_BLUEBERRY, SIZE_OUTBREAK_ZONES_BLUEBERRY },
+    };
+
+    for (const auto& spec : specs) {
+        SCBlock* block = save.findBlock(spec.key);
+        if (!block || block->type == SCTypeCode::None)
+            continue;
+
+        std::vector<uint8_t> nullData(spec.size, 0);
+        if (!save.replaceBlockData(spec.key, nullData)) {
+            result.message = "Failed to clear outbreak block";
+            return result;
+        }
+    }
+
+    // Match Tera-Finder's "000 Null Outbreak Event" behavior: BCAT stays
+    // enabled, payload is zeroed.
+    SCBlock* enabled = save.findBlock(KEY_OUTBREAK_ENABLED);
+    if (enabled && enabled->type != SCTypeCode::None) {
+        if (!save.setBoolBlock(KEY_OUTBREAK_ENABLED, true)) {
+            result.message = "Failed to enable outbreak event flag";
+            return result;
+        }
+    }
+
+    result.success = true;
+    result.identifier = "Null";
+    result.message = "Successfully cleared outbreak event data";
     return result;
 }
 

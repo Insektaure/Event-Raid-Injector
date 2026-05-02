@@ -72,6 +72,22 @@ bool SaveFile::replaceBlockData(uint32_t key, const std::vector<uint8_t>& data) 
     return true;
 }
 
+bool SaveFile::setBoolBlock(uint32_t key, bool value) {
+    SCTypeCode boolType = value ? SCTypeCode::Bool2 : SCTypeCode::Bool1;
+    SCBlock* block = SwishCrypto::findBlock(blocks_, key);
+    if (block) {
+        block->type = boolType;
+        block->data.clear();
+        return true;
+    }
+
+    SCBlock newBlock{};
+    newBlock.key = key;
+    newBlock.type = boolType;
+    blocks_.push_back(std::move(newBlock));
+    return true;
+}
+
 std::string SaveFile::verifyRoundTrip() {
     if (originalFileData_.empty())
         return "No original data";
