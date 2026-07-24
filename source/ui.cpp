@@ -692,6 +692,7 @@ void UI::drawMainScreenFrame() {
         "Inject Event",
         "Clear Event (Inject Null)",
         "Clear Outbreak Event (Inject Null)",
+        "Reset 7-Star Raid Captures",
         "Save & Exit",
         "Clear Cache & Revalidate Events",
         "Exit Without Saving",
@@ -704,6 +705,7 @@ void UI::drawMainScreenFrame() {
         raidPending_ || outbreakPending_,       // Inject: any pending selection
         true,                                   // Clear Raid: always
         true,                                   // Clear Outbreak: always
+        true,                                   // Reset Captures: always
         saveDirty_,                             // Save: any in-memory change
         true,                                   // Revalidate: always
         true,                                   // Exit: always
@@ -801,6 +803,9 @@ void UI::handleMainScreenInput(SDL_Event& e, bool& running) {
                 case MENU_CLEAR_OUTBREAK:
                     doClearOutbreakEvent();
                     break;
+                case MENU_RESET_CAPTURES:
+                    doResetCaptures();
+                    break;
                 case MENU_INJECT:
                     if (raidPending_ || outbreakPending_) doInject();
                     break;
@@ -864,6 +869,7 @@ void UI::handleMainScreenInput(SDL_Event& e, bool& running) {
                 case MENU_BROWSE_OUTBREAK: openOutbreakBrowser(); break;
                 case MENU_CLEAR: doClearEvent(); break;
                 case MENU_CLEAR_OUTBREAK: doClearOutbreakEvent(); break;
+                case MENU_RESET_CAPTURES: doResetCaptures(); break;
                 case MENU_INJECT: if (raidPending_ || outbreakPending_) doInject(); break;
                 case MENU_SAVE: if (saveDirty_) doSaveAndExit(running); break;
                 case MENU_REVALIDATE: {
@@ -964,6 +970,32 @@ void UI::doClearEvent() {
         raidPending_ = false;
         statusMessage_ = "Event data cleared";
         mainMenuCursor_ = MENU_SAVE;
+    } else {
+        statusMessage_ = "Error: " + result.message;
+    }
+
+    showMessageAndWait(result.success ? "Success" : "Error", result.message.c_str());
+}
+
+void UI::doResetCaptures() {
+    if (!saveLoaded_)
+        return;
+
+    if (!showConfirmDialog("Reset 7-Star Raid Captures",
+            "Clear the captured flag on all 7-Star raids so event\n"
+            "raids can be caught again? (Defeated history is kept.)"))
+        return;
+
+    showWorking("Resetting captures...");
+    InjectorResult result = Injector::resetSevenStarCaptures(save_);
+
+    if (result.success) {
+        if (result.count > 0) {
+            eventInjected_ = true;
+            saveDirty_ = true;
+            mainMenuCursor_ = MENU_SAVE;
+        }
+        statusMessage_ = result.message;
     } else {
         statusMessage_ = "Error: " + result.message;
     }

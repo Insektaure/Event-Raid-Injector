@@ -26,6 +26,7 @@ If you need to restore a backup, use a save manager such as [Checkpoint](https:/
 - **Mass Outbreak Injection** — Inject Mass Outbreak event data (Paldea / Kitakami / Blueberry zones)
 - **Combined Inject** — Stage a raid and an outbreak together; one Inject press commits both
 - **Event Clearing** — Remove active raid or outbreak event data independently
+- **Reset 7-Star Raid Captures** — Clear the "already captured" flag on event 7-Star raids so they can be caught again
 - **Automatic Backups** — Save data is backed up to SD card before any modification
 - **Round-Trip Verification** — Encryption integrity is verified after decryption to ensure data safety
 - **Theme Support** — Switch between Default (dark) and HOME (light pastel) themes
@@ -114,6 +115,16 @@ If only one slot is pending, only that one is injected; the other slot is left a
 - **Clear Outbreak Event (Inject Null)** — Zeros all outbreak event blocks while keeping the BCAT outbreak system enabled (matching Tera-Finder's null-event behavior).
 
 Clearing is immediate (it writes directly to the in-memory save and marks it dirty); you don't need to press Inject after a Clear.
+
+### Resetting 7-Star Raid Captures
+
+Event 7-Star Tera Raids (the "Unrivaled" series and similar) are limited to **one capture per save file**. Once you catch the boss, the game records it and won't let you catch it again.
+
+- **Reset 7-Star Raid Captures** — Clears the "captured" flag on every 7-Star raid record so those event raids can be caught again. The "defeated" history is left intact.
+
+This only resets your personal capture record — the raid still has to be **available** (an event distributed by Nintendo, or injected with this app) for you to re-battle it. It does not affect ordinary raids, which have no per-save capture limit.
+
+Like clearing, this is immediate: it writes directly to the in-memory save and marks it dirty, so you don't need to press Inject afterwards — just **Save & Exit**. A confirmation prompt is shown first, and the status line reports how many capture flags were reset.
 
 **Note:** After injecting a raid event, you may need to advance the system date by 1 day in-game to refresh the active raids. The same applies to outbreak rotations.
 

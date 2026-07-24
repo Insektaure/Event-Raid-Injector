@@ -6,6 +6,7 @@ struct InjectorResult {
     bool success;
     std::string message;
     std::string identifier;
+    int count = 0;  // operation-specific count (e.g. number of capture flags reset)
 };
 
 namespace Injector {
@@ -36,6 +37,14 @@ constexpr size_t SIZE_OUTBREAK_ZONES_PALDEA  = 0x300;
 constexpr size_t SIZE_OUTBREAK_ZONES_KITAKAMI = 0x300;
 constexpr size_t SIZE_OUTBREAK_ZONES_BLUEBERRY = 0x300;
 
+// 7-Star Tera Raid capture history block, from Tera-Finder / PKHeX
+// SaveBlockAccessor9SV.cs (KSevenStarRaidsCapture). This block enforces the
+// "one capture per save" limit for event 7-star raids. It is an array of 8-byte
+// records: [u32 identifier][u8 captured][u8 defeated][2 bytes padding].
+constexpr uint32_t KEY_SEVEN_STAR_CAPTURE  = 0x8B14392F;
+constexpr size_t SEVEN_STAR_RECORD_SIZE    = 0x08;
+constexpr size_t SEVEN_STAR_OFFSET_CAPTURED = 0x04;
+
 // Validate that a folder contains valid raid event files.
 // Expects: {path}/Identifier.txt and {path}/Files/ with binary data files.
 bool isValidRaidFolder(const std::string& path);
@@ -56,5 +65,11 @@ InjectorResult injectNullEvent(SaveFile& save);
 
 // Inject null/empty data to clear existing mass outbreak events.
 InjectorResult injectNullOutbreakEvent(SaveFile& save);
+
+// Reset the "captured" flag on every 7-star Tera Raid record so event raids
+// that are limited to one capture per save can be caught again. Only the
+// captured byte is cleared; the defeated flag is left intact. Returns the
+// number of flags cleared in result.count.
+InjectorResult resetSevenStarCaptures(SaveFile& save);
 
 } // namespace Injector

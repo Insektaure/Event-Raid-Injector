@@ -67,10 +67,11 @@ private:
     static constexpr int MENU_INJECT          = 2;
     static constexpr int MENU_CLEAR           = 3;
     static constexpr int MENU_CLEAR_OUTBREAK  = 4;
-    static constexpr int MENU_SAVE            = 5;
-    static constexpr int MENU_REVALIDATE      = 6;
-    static constexpr int MENU_EXIT            = 7;
-    static constexpr int MENU_ITEM_COUNT      = 8;
+    static constexpr int MENU_RESET_CAPTURES  = 5;
+    static constexpr int MENU_SAVE            = 6;
+    static constexpr int MENU_REVALIDATE      = 7;
+    static constexpr int MENU_EXIT            = 8;
+    static constexpr int MENU_ITEM_COUNT      = 9;
 
     // Injection state
     enum class EventKind { Raid, Outbreak };
@@ -132,6 +133,7 @@ private:
     void doInject();
     void doClearEvent();
     void doClearOutbreakEvent();
+    void doResetCaptures();
     void selectEventFolder();
     void openRaidBrowser();
     void openOutbreakBrowser();

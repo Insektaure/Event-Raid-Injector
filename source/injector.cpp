@@ -306,4 +306,50 @@ InjectorResult injectNullOutbreakEvent(SaveFile& save) {
     return result;
 }
 
+InjectorResult resetSevenStarCaptures(SaveFile& save) {
+    InjectorResult result{};
+
+    if (!save.isLoaded()) {
+        result.message = "Save file not loaded";
+        return result;
+    }
+
+    SCBlock* block = save.findBlock(KEY_SEVEN_STAR_CAPTURE);
+    if (!block || block->type == SCTypeCode::None || block->data.empty()) {
+        // No 7-star capture history in this save: nothing to do. Not an error.
+        result.success = true;
+        result.count = 0;
+        result.message = "No 7-Star raid captures to reset";
+        return result;
+    }
+
+    // Read-modify-write: clear the captured byte of each 8-byte record.
+    std::vector<uint8_t> data = block->data;
+    int cleared = 0;
+    for (size_t i = 0; i + SEVEN_STAR_RECORD_SIZE <= data.size(); i += SEVEN_STAR_RECORD_SIZE) {
+        uint8_t& captured = data[i + SEVEN_STAR_OFFSET_CAPTURED];
+        if (captured != 0) {
+            captured = 0;   // leave the defeated flag (offset 0x05) untouched
+            ++cleared;
+        }
+    }
+
+    if (cleared == 0) {
+        result.success = true;
+        result.count = 0;
+        result.message = "No captured 7-Star raids found to reset";
+        return result;
+    }
+
+    if (!save.replaceBlockData(KEY_SEVEN_STAR_CAPTURE, data)) {
+        result.message = "Failed to write 7-Star raid capture block";
+        return result;
+    }
+
+    result.success = true;
+    result.count = cleared;
+    result.message = "Reset " + std::to_string(cleared) + " 7-Star raid capture(s)";
+    return result;
+}
+
 } // namespace Injector
