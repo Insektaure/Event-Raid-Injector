@@ -279,8 +279,26 @@ bool UI::showConfirmDialog(const char* title, const char* body) {
         drawRect(0, 0, SCREEN_W, SCREEN_H, T().overlay);
 
         drawTextCentered(fontLarge_, title, SCREEN_W/2, SCREEN_H/2 - 60, T().red);
-        drawTextCentered(font_, body, SCREEN_W/2, SCREEN_H/2, T().text);
-        drawTextCentered(fontSmall_, "A: Confirm   B: Cancel", SCREEN_W/2, SCREEN_H/2 + 50, T().textDim);
+
+        // Render body line-by-line; SDL_ttf doesn't interpret '\n'.
+        std::string s(body ? body : "");
+        std::vector<std::string> lines;
+        size_t start = 0;
+        while (start <= s.size()) {
+            size_t nl = s.find('\n', start);
+            if (nl == std::string::npos) { lines.push_back(s.substr(start)); break; }
+            lines.push_back(s.substr(start, nl - start));
+            start = nl + 1;
+        }
+        const int lineH = 28;
+        int by = SCREEN_H/2 - (int(lines.size()) - 1) * lineH / 2;
+        for (const auto& line : lines) {
+            drawTextCentered(font_, line.c_str(), SCREEN_W/2, by, T().text);
+            by += lineH;
+        }
+
+        drawTextCentered(fontSmall_, "A: Confirm   B: Cancel", SCREEN_W/2,
+                         SCREEN_H/2 + (int(lines.size()) * lineH)/2 + 30, T().textDim);
 
         SDL_RenderPresent(renderer_);
         SDL_Delay(16);
